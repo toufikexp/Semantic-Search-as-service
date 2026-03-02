@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     DATABASE_URL_SYNC: str = (
         "postgresql://postgres:changeme@localhost:5432/semantic_search"
     )
+    DB_PASSWORD: str = "changeme"
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -33,7 +34,7 @@ class Settings(BaseSettings):
     MAX_CRAWL_PAGES: int = 500
     CRAWL_DELAY_SECONDS: float = 1.0
 
-    model_config = {"env_file": ".env", "case_sensitive": True}
+    model_config = {"env_file": ".env", "case_sensitive": True, "extra": "ignore"}
 
 
 settings = Settings()
