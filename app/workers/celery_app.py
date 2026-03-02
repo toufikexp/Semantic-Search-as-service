@@ -19,6 +19,7 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     task_routes={
         "app.workers.tasks.process_ingestion_job": {"queue": "embeddings"},
+        "app.workers.tasks.compute_query_embedding": {"queue": "embeddings"},
         "app.workers.tasks.run_crawl": {"queue": "crawling"},
     },
     beat_schedule={

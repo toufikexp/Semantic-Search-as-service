@@ -306,6 +306,13 @@ def process_crawled_documents(collection_id: str):
 
 
 @celery_app.task
+def compute_query_embedding(query: str) -> list[float]:
+    """Compute embedding for a single search query (runs on embedding-worker)."""
+    vectors = compute_embeddings([query])
+    return vectors[0]
+
+
+@celery_app.task
 def cleanup_search_logs():
     """Remove search logs older than 90 days."""
     engine = _get_sync_engine()

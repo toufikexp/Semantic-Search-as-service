@@ -42,9 +42,35 @@ def compute_embeddings(texts: list[str]) -> list[list[float]]:
 
 
 async def get_query_embedding(query: str) -> list[float]:
-    """Get embedding for a search query (async wrapper)."""
+    """Get embedding for a search query.
+
+    Delegates to the embedding-worker via Celery so the search-api never
+    loads the model.  Results are cached in Redis to avoid repeated calls.
+    """
     import asyncio
+    import hashlib
+    import json
+
+    import redis
+
+    cache_key = f"emb:query:{hashlib.sha256(query.encode()).hexdigest()}"
+    r = redis.Redis.from_url(settings.REDIS_URL)
+
+    # Check cache first
+    cached = r.get(cache_key)
+    if cached is not None:
+        return json.loads(cached)
+
+    # Dispatch to embedding-worker and wait for the result
+    from app.workers.tasks import compute_query_embedding
 
     loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(None, compute_embeddings, [query])
-    return result[0]
+    async_result = compute_query_embedding.delay(query)
+    vector = await loop.run_in_executor(
+        None, async_result.get, settings.EMBEDDING_QUERY_TIMEOUT
+    )
+
+    # Cache for future queries
+    r.setex(cache_key, settings.EMBEDDING_CACHE_TTL, json.dumps(vector))
+
+    return vector
