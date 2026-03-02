@@ -1,0 +1,39 @@
+from pydantic_settings import BaseSettings
+
+
+class Settings(BaseSettings):
+    # Database
+    DATABASE_URL: str = (
+        "postgresql+asyncpg://postgres:changeme@localhost:5432/semantic_search"
+    )
+    DATABASE_URL_SYNC: str = (
+        "postgresql://postgres:changeme@localhost:5432/semantic_search"
+    )
+
+    # Redis
+    REDIS_URL: str = "redis://localhost:6379/0"
+
+    # API
+    API_HOST: str = "0.0.0.0"
+    API_PORT: int = 8000
+    SECRET_KEY: str = "your-secret-key-change-in-production"
+    DEBUG: bool = False
+    API_V1_PREFIX: str = "/api/v1"
+
+    # Embedding
+    DEFAULT_EMBEDDING_MODEL: str = "bge-m3"
+    EMBEDDING_BATCH_SIZE: int = 32
+    EMBEDDING_DEVICE: str = "cpu"
+    EMBEDDING_DIM: int = 1024
+
+    # Rate Limiting
+    RATE_LIMIT_ENABLED: bool = True
+
+    # Crawling
+    MAX_CRAWL_PAGES: int = 500
+    CRAWL_DELAY_SECONDS: float = 1.0
+
+    model_config = {"env_file": ".env", "case_sensitive": True}
+
+
+settings = Settings()

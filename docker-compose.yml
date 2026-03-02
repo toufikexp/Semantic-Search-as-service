@@ -1,0 +1,153 @@
+services:
+  # ── Data Layer ──
+  postgres:
+    image: pgvector/pgvector:pg16
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: semantic_search
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+    ports:
+      - "5432:5432"
+    deploy:
+      resources:
+        limits:
+          memory: 16G
+          cpus: "4"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 4gb --maxmemory-policy allkeys-lru
+    volumes:
+      - redisdata:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Application Layer ──
+  search-api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:${DB_PASSWORD:-changeme}@postgres:5432/semantic_search
+      DATABASE_URL_SYNC: postgresql://postgres:${DB_PASSWORD:-changeme}@postgres:5432/semantic_search
+      REDIS_URL: redis://redis:6379/0
+      DEBUG: ${DEBUG:-false}
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  ingestion-api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    command: uvicorn app.ingest:app --host 0.0.0.0 --port 8001 --workers 1
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:${DB_PASSWORD:-changeme}@postgres:5432/semantic_search
+      DATABASE_URL_SYNC: postgresql://postgres:${DB_PASSWORD:-changeme}@postgres:5432/semantic_search
+      REDIS_URL: redis://redis:6379/0
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  embedding-worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.gpu
+    environment:
+      DATABASE_URL_SYNC: postgresql://postgres:${DB_PASSWORD:-changeme}@postgres:5432/semantic_search
+      REDIS_URL: redis://redis:6379/0
+      EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 4G
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  crawler-worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.crawler
+    environment:
+      DATABASE_URL_SYNC: postgresql://postgres:${DB_PASSWORD:-changeme}@postgres:5432/semantic_search
+      REDIS_URL: redis://redis:6379/0
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 2G
+          cpus: "1"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    command: celery -A app.workers.celery_app beat --loglevel=info
+    environment:
+      DATABASE_URL_SYNC: postgresql://postgres:${DB_PASSWORD:-changeme}@postgres:5432/semantic_search
+      REDIS_URL: redis://redis:6379/0
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # ── Gateway ──
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    depends_on:
+      - search-api
+      - ingestion-api
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  pgdata:
+  redisdata:
