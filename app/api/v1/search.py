@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,6 +13,8 @@ from app.schemas.search import (
     SuggestResponse,
 )
 from app.services import search_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -38,9 +41,27 @@ async def search_collection(
     # Generate query embedding for semantic/hybrid search
     query_vector = None
     if body.mode in ("semantic", "hybrid"):
-        from app.services.embedding_service import get_query_embedding
+        try:
+            from app.services.embedding_service import get_query_embedding
 
-        query_vector = await get_query_embedding(body.query)
+            query_vector = await get_query_embedding(body.query)
+        except Exception:
+            logger.exception("Failed to generate query embedding")
+            if body.mode == "semantic":
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "error": {
+                            "code": "EMBEDDING_UNAVAILABLE",
+                            "message": "Embedding service is currently unavailable. "
+                            "Try mode='keyword' or mode='hybrid' as a fallback.",
+                        }
+                    },
+                )
+            # For hybrid mode, fall back to keyword-only search
+            logger.warning(
+                "Falling back to keyword-only search for hybrid query"
+            )
 
     return await search_service.execute_search(
         db, collection_id, body, query_vector

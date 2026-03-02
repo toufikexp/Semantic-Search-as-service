@@ -1,3 +1,4 @@
+import logging
 import time
 import uuid
 
@@ -17,6 +18,8 @@ from app.schemas.search import (
     SuggestResponse,
 )
 
+logger = logging.getLogger(__name__)
+
 
 async def execute_search(
     db: AsyncSession,
@@ -28,44 +31,50 @@ async def execute_search(
     start_time = time.monotonic()
     query_id = uuid.uuid4()
     results: list[SearchResult] = []
+    total = 0
+    facets: dict = {}
 
-    if request.mode in ("semantic", "hybrid") and query_vector is not None:
-        results = await _vector_search(
-            db, collection_id, query_vector, request
-        )
+    try:
+        if request.mode in ("semantic", "hybrid") and query_vector is not None:
+            results = await _vector_search(
+                db, collection_id, query_vector, request
+            )
 
-    if request.mode in ("keyword", "hybrid"):
-        keyword_results = await _keyword_search(db, collection_id, request)
-        if request.mode == "hybrid" and results:
-            results = _merge_results(results, keyword_results)
-        elif not results:
-            results = keyword_results
+        if request.mode in ("keyword", "hybrid"):
+            keyword_results = await _keyword_search(db, collection_id, request)
+            if request.mode == "hybrid" and results:
+                results = _merge_results(results, keyword_results)
+            elif not results:
+                results = keyword_results
 
-    # Apply min_score filter
-    if request.min_score > 0:
-        results = [r for r in results if r.score >= request.min_score]
+        # Apply min_score filter
+        if request.min_score > 0:
+            results = [r for r in results if r.score >= request.min_score]
 
-    total = len(results)
-    results = results[request.offset : request.offset + request.limit]
+        total = len(results)
+        results = results[request.offset : request.offset + request.limit]
 
-    # Compute facets
-    facets = {}
-    if request.facets:
-        facets = await _compute_facets(db, collection_id, request)
+        # Compute facets
+        if request.facets:
+            facets = await _compute_facets(db, collection_id, request)
+    finally:
+        # Always log the search, even on partial failure
+        elapsed_ms = int((time.monotonic() - start_time) * 1000)
+        try:
+            log_entry = SearchLog(
+                collection_id=collection_id,
+                query=request.query,
+                mode=request.mode,
+                filters=request.filters if request.filters else None,
+                results_count=total,
+                latency_ms=elapsed_ms,
+            )
+            db.add(log_entry)
+            await db.commit()
+        except Exception:
+            logger.exception("Failed to write search log entry")
 
     elapsed_ms = int((time.monotonic() - start_time) * 1000)
-
-    # Log the search
-    log_entry = SearchLog(
-        collection_id=collection_id,
-        query=request.query,
-        mode=request.mode,
-        filters=request.filters if request.filters else None,
-        results_count=total,
-        latency_ms=elapsed_ms,
-    )
-    db.add(log_entry)
-    await db.commit()
 
     return SearchResponse(
         results=results,

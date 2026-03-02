@@ -57,6 +57,21 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logging.getLogger(__name__).error("Unhandled exception: %s", exc, exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": {
+                "code": "INTERNAL_ERROR",
+                "message": "An unexpected error occurred",
+                "request_id": str(uuid.uuid4()),
+            }
+        },
+    )
+
+
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "service": "ingestion", "version": "1.0.0"}
