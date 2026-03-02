@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, Boolean, Integer, DateTime, ForeignKey, func, Index
+from sqlalchemy import String, Boolean, Integer, DateTime, ForeignKey, func, Index, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -37,5 +37,5 @@ class ApiKey(Base):
     collection = relationship("Collection", back_populates="api_keys")
 
     __table_args__ = (
-        Index("idx_api_keys_hash", "key_hash", postgresql_where=(is_active.is_(True))),
+        Index("idx_api_keys_hash", "key_hash", postgresql_where=text("is_active = true")),
     )

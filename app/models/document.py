@@ -42,5 +42,5 @@ class Document(Base):
 
     __table_args__ = (
         UniqueConstraint("collection_id", "external_id", name="uq_document_collection_extid"),
-        Index("idx_documents_metadata", "metadata_", postgresql_using="gin"),
+        Index("idx_documents_metadata", "metadata", postgresql_using="gin"),
     )

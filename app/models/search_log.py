@@ -30,5 +30,5 @@ class SearchLog(Base):
     )
 
     __table_args__ = (
-        Index("idx_search_logs_time", "collection_id", created_at.desc()),
+        Index("idx_search_logs_time", "collection_id", "created_at"),
     )
