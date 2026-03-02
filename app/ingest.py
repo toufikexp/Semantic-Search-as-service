@@ -24,6 +24,23 @@ app = FastAPI(
 
 Instrumentator().instrument(app).expose(app)
 
+logger = logging.getLogger(__name__)
+
+
+@app.on_event("startup")
+async def on_startup():
+    """Create database tables and enable pgvector if they don't exist yet."""
+    from sqlalchemy import text as sa_text
+
+    from app.core.database import Base, engine
+    import app.models  # noqa: F401
+
+    async with engine.begin() as conn:
+        await conn.execute(sa_text("CREATE EXTENSION IF NOT EXISTS vector"))
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("Database tables verified / created")
+
+
 # Include only ingestion-related routes
 app.include_router(
     documents.router,

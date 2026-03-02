@@ -38,6 +38,22 @@ Instrumentator().instrument(app).expose(app)
 # API routes
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
+logger = logging.getLogger(__name__)
+
+
+@app.on_event("startup")
+async def on_startup():
+    """Create database tables and enable pgvector if they don't exist yet."""
+    from sqlalchemy import text as sa_text
+
+    from app.core.database import Base, engine
+    import app.models  # noqa: F401 – register all models with Base
+
+    async with engine.begin() as conn:
+        await conn.execute(sa_text("CREATE EXTENSION IF NOT EXISTS vector"))
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("Database tables verified / created")
+
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):

@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     EMBEDDING_DEVICE: str = "cpu"
     EMBEDDING_DIM: int = 1024
     EMBEDDING_CACHE_TTL: int = 3600  # seconds to cache query embeddings in Redis
-    EMBEDDING_QUERY_TIMEOUT: int = 30  # seconds to wait for worker response
+    EMBEDDING_QUERY_TIMEOUT: int = 10  # seconds to wait for worker response
 
     # Rate Limiting
     RATE_LIMIT_ENABLED: bool = True
