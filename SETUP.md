@@ -9,7 +9,7 @@
 | Resource | Minimum | Recommended |
 |----------|---------|-------------|
 | RAM | 8 GB | 16 GB |
-| Disk | 10 GB free | 20 GB free |
+| Disk | 15 GB free | 25 GB free |
 | CPU | 4 cores | 8 cores |
 | GPU | Not required (CPU mode) | NVIDIA GPU for faster embedding |
 | OS | WSL 2 + Ubuntu 22.04/24.04 | Same |
@@ -92,6 +92,8 @@ DEBUG=true
 DEFAULT_EMBEDDING_MODEL=bge-m3
 EMBEDDING_BATCH_SIZE=32
 EMBEDDING_DEVICE=cpu
+EMBEDDING_CACHE_TTL=3600
+EMBEDDING_QUERY_TIMEOUT=30
 
 # Rate Limiting
 RATE_LIMIT_ENABLED=true
@@ -113,6 +115,8 @@ This single command builds and starts all 7 services:
 docker compose up --build -d
 ```
 
+> **First build note:** The `embedding-worker` image downloads and bakes the BGE-M3 model (~2.3 GB) into the Docker image during `docker build`. This makes the first build slow but means **no internet access is needed at runtime** (safe for air-gapped / offline servers). Subsequent builds reuse the Docker layer cache and are fast.
+
 **What gets started:**
 
 | Service | Port | Purpose |
@@ -121,7 +125,7 @@ docker compose up --build -d
 | `redis` | 6379 | Cache & task queue |
 | `search-api` (x2 replicas) | 8000 (internal) | Search & collection endpoints |
 | `ingestion-api` | 8001 (internal) | Document ingestion endpoints |
-| `embedding-worker` | - | Celery worker for embedding generation |
+| `embedding-worker` | - | Celery worker for embedding generation (model baked in at build time) |
 | `crawler-worker` | - | Celery worker for web crawling |
 | `scheduler` | - | Celery beat for scheduled tasks |
 | `nginx` | **80** | Gateway / reverse proxy (your entry point) |
@@ -415,7 +419,7 @@ Semantic-Search-as-service/
 │   └── ingest.py           # Ingestion API FastAPI app
 ├── docker/
 │   ├── Dockerfile.api      # API & scheduler image
-│   ├── Dockerfile.gpu      # Embedding worker image
+│   ├── Dockerfile.gpu      # Embedding worker image (pre-baked model, GPU support)
 │   └── Dockerfile.crawler  # Crawler worker image
 ├── migrations/
 │   └── versions/           # Alembic migration (initial schema with pgvector)

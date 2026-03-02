@@ -10,9 +10,10 @@ A production-ready, self-hosted semantic search platform that adds powerful sear
 - **Web Crawling** — Built-in crawler to ingest content directly from websites
 - **Autocomplete** — Suggestion endpoint powered by document titles and popular past queries
 - **Faceted Search** — Compute facet counts over document metadata fields
-- **Async Pipeline** — Celery workers handle embedding generation and crawling in the background
+- **Async Pipeline** — Celery workers handle embedding generation (including search-time query embeddings) and crawling in the background
 - **Observability** — Prometheus metrics, structured logging, and search analytics (query logs)
 - **Dockerized** — Full stack orchestrated with Docker Compose (PostgreSQL + pgvector, Redis, Nginx, API, workers)
+- **Offline / Air-Gapped** — The BGE-M3 embedding model is baked into the Docker image at build time; no internet access is needed at runtime
 
 ## Tech Stack
 
@@ -43,7 +44,8 @@ A production-ready, self-hosted semantic search platform that adds powerful sear
               └──────────▲──────────────────────────────┘
                          │
               ┌──────────┴──────────┐
-              │   Redis (queue)     │
+              │  Redis (queue +     │
+              │  embedding cache)   │
               └──┬──────────────┬───┘
                  │              │
           ┌──────▼───┐  ┌──────▼──────┐
@@ -51,6 +53,9 @@ A production-ready, self-hosted semantic search platform that adds powerful sear
           │ Worker    │  │  Worker     │
           └──────────┘  └─────────────┘
 ```
+
+> **Note:** The search-api does **not** load the embedding model. Query embeddings
+> are delegated to the embedding-worker via Celery and cached in Redis (default 1 hour TTL).
 
 **Services started by Docker Compose:**
 
@@ -60,7 +65,7 @@ A production-ready, self-hosted semantic search platform that adds powerful sear
 | `redis` | 6379 | Cache, task queue broker |
 | `search-api` (x2) | 8000 (internal) | Collection management & search endpoints |
 | `ingestion-api` | 8001 (internal) | Document ingestion endpoints |
-| `embedding-worker` | — | Celery worker for vector embedding generation |
+| `embedding-worker` | — | Celery worker for vector embedding generation (model baked in at build time) |
 | `crawler-worker` | — | Celery worker for web crawling |
 | `scheduler` | — | Celery beat for scheduled tasks |
 | `nginx` | **80** | Gateway / reverse proxy (entry point) |
@@ -203,6 +208,8 @@ Environment variables (set in `.env`):
 | `DEFAULT_EMBEDDING_MODEL` | `bge-m3` | Sentence-transformer model for embeddings |
 | `EMBEDDING_BATCH_SIZE` | `32` | Batch size for embedding generation |
 | `EMBEDDING_DEVICE` | `cpu` | `cpu` or `cuda` for GPU acceleration |
+| `EMBEDDING_CACHE_TTL` | `3600` | Seconds to cache query embeddings in Redis |
+| `EMBEDDING_QUERY_TIMEOUT` | `30` | Seconds to wait for embedding-worker response |
 | `RATE_LIMIT_ENABLED` | `true` | Enable per-key rate limiting |
 | `MAX_CRAWL_PAGES` | `500` | Max pages per crawl job |
 | `CRAWL_DELAY_SECONDS` | `1.0` | Delay between crawl requests |
@@ -222,7 +229,7 @@ Semantic-Search-as-service/
 │   └── ingest.py           # Ingestion API FastAPI application
 ├── docker/
 │   ├── Dockerfile.api      # API & scheduler image
-│   ├── Dockerfile.gpu      # Embedding worker image (GPU support)
+│   ├── Dockerfile.gpu      # Embedding worker image (pre-baked model, GPU support)
 │   └── Dockerfile.crawler  # Crawler worker image
 ├── migrations/versions/    # Alembic database migrations
 ├── nginx/conf.d/           # Nginx reverse proxy configuration
@@ -274,6 +281,6 @@ docker compose down -v
 | Resource | Minimum | Recommended |
 |----------|---------|-------------|
 | RAM | 8 GB | 16 GB |
-| Disk | 10 GB free | 20 GB free |
+| Disk | 15 GB free | 25 GB free |
 | CPU | 4 cores | 8 cores |
 | GPU | Not required | NVIDIA GPU for faster embedding |
