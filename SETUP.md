@@ -203,11 +203,11 @@ INSERT INTO organizations (id, name, plan_tier)
 VALUES ('11111111-1111-1111-1111-111111111111', 'Demo Org', 'pro');
 
 -- Create a master API key (hash of "sk_master_demo_key_for_testing")
--- SHA-256 of that string = we'll use a known hash
+-- echo -n "sk_master_demo_key_for_testing" | sha256sum
 INSERT INTO api_keys (org_id, key_hash, key_prefix, scope, rate_limit, is_active)
 VALUES (
   '11111111-1111-1111-1111-111111111111',
-  'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+  'dd7b6229a6371b2c8554ff0f914033bb139c8035dabb4a507bc722aa358fcf07',
   'sk_master_',
   'master',
   600,
