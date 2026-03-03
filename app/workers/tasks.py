@@ -225,7 +225,9 @@ def run_crawl(self, job_id: str, collection_id: str, crawl_config: dict):
                                 if len(urls) >= max_pages:
                                     break
                     except Exception as e:
-                        logger.warning(f"Failed to fetch child sitemap {loc.text}: {e}")
+                        logger.warning(
+                            f"Failed to fetch child sitemap {loc.text}: {e}"
+                        )
                     if len(urls) >= max_pages:
                         break
             else:
@@ -334,6 +336,11 @@ def process_crawled_documents(job_id: str, collection_id: str):
             try:
                 _process_single_document(db, doc, collection)
                 processed += 1
+                # Update job progress after each document so that
+                # GET /jobs/{id} reflects real-time chunking/embedding progress
+                if job:
+                    job.processed_docs = processed
+                    db.commit()
             except Exception as e:
                 logger.exception(f"Failed to process crawled doc {doc.external_id}")
                 doc.status = "failed"
