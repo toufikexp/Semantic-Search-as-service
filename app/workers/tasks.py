@@ -329,13 +329,21 @@ def process_crawled_documents(job_id: str, collection_id: str):
             .all()
         )
 
+        total = len(documents)
         errors = {}
         processed = 0
+
+        logger.info(
+            f"Job {job_id}: starting chunking/embedding for {total} documents"
+        )
 
         for doc in documents:
             try:
                 _process_single_document(db, doc, collection)
                 processed += 1
+                logger.info(
+                    f"Job {job_id}: [{processed}/{total}] indexed {doc.external_id}"
+                )
                 # Update job progress after each document so that
                 # GET /jobs/{id} reflects real-time chunking/embedding progress
                 if job:

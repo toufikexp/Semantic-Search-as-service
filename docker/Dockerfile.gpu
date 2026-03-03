@@ -25,4 +25,4 @@ COPY . .
 RUN useradd -m appuser && chown -R appuser:appuser /app
 USER appuser
 
-CMD ["celery", "-A", "app.workers.celery_app", "worker", "-Q", "embeddings", "--loglevel=info", "--concurrency=2"]
+CMD ["celery", "-A", "app.workers.celery_app", "worker", "-Q", "embeddings", "--loglevel=info", "--pool=solo"]
