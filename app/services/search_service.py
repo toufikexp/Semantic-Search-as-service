@@ -213,20 +213,26 @@ def _merge_results(
     keyword_results: list[SearchResult],
     vector_weight: float = 0.7,
     keyword_weight: float = 0.3,
+    k: int = 60,
 ) -> list[SearchResult]:
-    """Merge vector and keyword results using reciprocal rank fusion."""
+    """Merge vector and keyword results using score-weighted reciprocal rank fusion.
+
+    Each result's original score (cosine similarity for vector, ts_rank for
+    keyword) is multiplied into the RRF contribution so that low-relevance
+    results are penalised even when they rank highly.  Scores are scaled by *k*
+    so that a perfect match from both sources tops out at ~1.0.
+    """
     scores: dict[str, tuple[float, SearchResult]] = {}
 
     for rank, r in enumerate(vector_results):
-        rrf_score = vector_weight / (rank + 60)
+        rrf_score = vector_weight * r.score * k / (rank + k)
         scores[r.external_id] = (rrf_score, r)
 
     for rank, r in enumerate(keyword_results):
-        rrf_score = keyword_weight / (rank + 60)
+        rrf_score = keyword_weight * r.score * k / (rank + k)
         if r.external_id in scores:
             existing_score, existing_result = scores[r.external_id]
             merged_score = existing_score + rrf_score
-            # Combine highlights
             highlights = list(
                 dict.fromkeys(existing_result.highlights + r.highlights)
             )
@@ -247,25 +253,18 @@ def _merge_results(
 
     sorted_results = sorted(scores.values(), key=lambda x: x[0], reverse=True)
 
-    # Normalize scores to 0-1 range so they are consistent and intuitive
-    if not sorted_results:
-        return []
-    max_score = sorted_results[0][0]
-    results = []
-    for rrf_score, r in sorted_results:
-        normalized = rrf_score / max_score if max_score > 0 else 0.0
-        results.append(
-            SearchResult(
-                doc_id=r.doc_id,
-                external_id=r.external_id,
-                score=round(normalized, 4),
-                title=r.title,
-                url=r.url,
-                highlights=r.highlights,
-                metadata=r.metadata,
-            )
+    return [
+        SearchResult(
+            doc_id=r.doc_id,
+            external_id=r.external_id,
+            score=round(rrf_score, 4),
+            title=r.title,
+            url=r.url,
+            highlights=r.highlights,
+            metadata=r.metadata,
         )
-    return results
+        for rrf_score, r in sorted_results
+    ]
 
 
 async def _compute_facets(
