@@ -66,17 +66,26 @@ async def trigger_crawl(
             },
         )
 
+    from app.models.ingestion_job import IngestionJob
     from app.workers.tasks import run_crawl
 
-    job_id = uuid.uuid4()
+    job = IngestionJob(
+        collection_id=collection_id,
+        status="crawling",
+        total_docs=0,
+    )
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+
     run_crawl.delay(
-        str(job_id),
+        str(job.id),
         str(collection_id),
         body.model_dump(),
     )
 
     return CrawlResponse(
-        job_id=job_id,
+        job_id=job.id,
         status="started",
         pages_discovered=0,
     )

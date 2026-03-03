@@ -184,6 +184,8 @@ def run_crawl(self, job_id: str, collection_id: str, crawl_config: dict):
     """Execute a website crawl and ingest discovered pages."""
     logger.info(f"Starting crawl job {job_id} for collection {collection_id}")
 
+    import hashlib
+
     import httpx
     from bs4 import BeautifulSoup
 
@@ -199,14 +201,43 @@ def run_crawl(self, job_id: str, collection_id: str, crawl_config: dict):
             response = httpx.get(sitemap_url, timeout=30, follow_redirects=True)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, "lxml-xml")
-            for loc in soup.find_all("loc"):
-                url = loc.text.strip()
-                if _url_matches_patterns(url, include_patterns, exclude_patterns):
-                    urls.append(url)
+
+            # Handle sitemap index files: if the sitemap contains <sitemap>
+            # entries, fetch each child sitemap to collect page URLs.
+            child_sitemaps = soup.find_all("sitemap")
+            if child_sitemaps:
+                for sm in child_sitemaps:
+                    loc = sm.find("loc")
+                    if not loc:
+                        continue
+                    try:
+                        child_resp = httpx.get(
+                            loc.text.strip(), timeout=30, follow_redirects=True
+                        )
+                        child_resp.raise_for_status()
+                        child_soup = BeautifulSoup(child_resp.text, "lxml-xml")
+                        for child_loc in child_soup.find_all("loc"):
+                            page_url = child_loc.text.strip()
+                            if _url_matches_patterns(
+                                page_url, include_patterns, exclude_patterns
+                            ):
+                                urls.append(page_url)
+                                if len(urls) >= max_pages:
+                                    break
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch child sitemap {loc.text}: {e}")
                     if len(urls) >= max_pages:
                         break
+            else:
+                for loc in soup.find_all("loc"):
+                    url = loc.text.strip()
+                    if _url_matches_patterns(url, include_patterns, exclude_patterns):
+                        urls.append(url)
+                        if len(urls) >= max_pages:
+                            break
         except Exception as e:
             logger.error(f"Failed to parse sitemap {sitemap_url}: {e}")
+            _update_job_status(job_id, "failed", errors={"sitemap": str(e)})
             return
 
     engine = _get_sync_engine()
@@ -230,8 +261,6 @@ def run_crawl(self, job_id: str, collection_id: str, crawl_config: dict):
                 if not content.strip():
                     continue
 
-                import hashlib
-
                 content_hash = hashlib.sha256(content.encode()).hexdigest()
                 external_id = hashlib.md5(url.encode()).hexdigest()
 
@@ -251,17 +280,27 @@ def run_crawl(self, job_id: str, collection_id: str, crawl_config: dict):
             except Exception as e:
                 logger.warning(f"Failed to crawl {url}: {e}")
 
+        # Update job with crawl totals
+        job = db.execute(
+            select(IngestionJob).where(IngestionJob.id == job_id)
+        ).scalar_one_or_none()
+        if job:
+            job.total_docs = crawled
+            job.status = "processing" if crawled > 0 else "completed"
+
         db.commit()
 
     logger.info(f"Crawl job {job_id}: crawled {crawled} pages from {len(urls)} URLs")
 
     # Trigger ingestion processing for crawled documents
     if crawled > 0:
-        process_crawled_documents.delay(collection_id)
+        process_crawled_documents.delay(job_id, collection_id)
+    else:
+        _update_job_status(job_id, "completed")
 
 
 @celery_app.task
-def process_crawled_documents(collection_id: str):
+def process_crawled_documents(job_id: str, collection_id: str):
     """Process pending documents from a crawl."""
     engine = _get_sync_engine()
 
@@ -272,6 +311,10 @@ def process_crawled_documents(collection_id: str):
 
         if not collection:
             return
+
+        job = db.execute(
+            select(IngestionJob).where(IngestionJob.id == job_id)
+        ).scalar_one_or_none()
 
         documents = (
             db.execute(
@@ -284,12 +327,23 @@ def process_crawled_documents(collection_id: str):
             .all()
         )
 
+        errors = {}
+        processed = 0
+
         for doc in documents:
             try:
                 _process_single_document(db, doc, collection)
+                processed += 1
             except Exception as e:
                 logger.exception(f"Failed to process crawled doc {doc.external_id}")
                 doc.status = "failed"
+                errors[doc.external_id] = str(e)
+
+        if job:
+            job.processed_docs = processed
+            job.failed_docs = len(errors)
+            job.errors = errors
+            job.status = "completed" if not errors else "completed_with_errors"
 
         collection.doc_count = (
             db.execute(
@@ -303,6 +357,24 @@ def process_crawled_documents(collection_id: str):
         ).__len__()
 
         db.commit()
+
+    logger.info(
+        f"Crawl ingestion job {job_id}: {processed} processed, {len(errors)} errors"
+    )
+
+
+def _update_job_status(job_id: str, status: str, errors: dict | None = None):
+    """Helper to update an IngestionJob status from any task."""
+    engine = _get_sync_engine()
+    with Session(engine) as db:
+        job = db.execute(
+            select(IngestionJob).where(IngestionJob.id == job_id)
+        ).scalar_one_or_none()
+        if job:
+            job.status = status
+            if errors:
+                job.errors = errors
+            db.commit()
 
 
 @celery_app.task
