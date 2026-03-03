@@ -103,13 +103,13 @@ async def _vector_search(
             d.url,
             d.metadata,
             c.content AS chunk_content,
-            1 - (e.vector <=> :query_vector::vector) AS score
+            1 - (e.vector <=> CAST(:query_vector AS vector)) AS score
         FROM embeddings e
         JOIN chunks c ON c.id = e.chunk_id
         JOIN documents d ON d.id = c.document_id
         WHERE e.collection_id = :collection_id
           AND d.status = 'indexed'
-        ORDER BY e.vector <=> :query_vector::vector
+        ORDER BY e.vector <=> CAST(:query_vector AS vector)
         LIMIT :limit
     """)
 
