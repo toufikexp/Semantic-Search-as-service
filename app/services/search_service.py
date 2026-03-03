@@ -235,7 +235,7 @@ def _merge_results(
                 SearchResult(
                     doc_id=existing_result.doc_id,
                     external_id=existing_result.external_id,
-                    score=round(merged_score, 4),
+                    score=merged_score,
                     title=existing_result.title,
                     url=existing_result.url,
                     highlights=highlights,
@@ -246,7 +246,26 @@ def _merge_results(
             scores[r.external_id] = (rrf_score, r)
 
     sorted_results = sorted(scores.values(), key=lambda x: x[0], reverse=True)
-    return [r for _, r in sorted_results]
+
+    # Normalize scores to 0-1 range so they are consistent and intuitive
+    if not sorted_results:
+        return []
+    max_score = sorted_results[0][0]
+    results = []
+    for rrf_score, r in sorted_results:
+        normalized = rrf_score / max_score if max_score > 0 else 0.0
+        results.append(
+            SearchResult(
+                doc_id=r.doc_id,
+                external_id=r.external_id,
+                score=round(normalized, 4),
+                title=r.title,
+                url=r.url,
+                highlights=r.highlights,
+                metadata=r.metadata,
+            )
+        )
+    return results
 
 
 async def _compute_facets(
