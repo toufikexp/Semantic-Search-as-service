@@ -11,6 +11,10 @@ requires-python = ">=3.11"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "eval: search quality evaluation tests (require DB + embedding model)",
+    "integration: end-to-end pipeline tests (require DB + embedding model)",
+]
 
 [tool.ruff]
 target-version = "py311"
