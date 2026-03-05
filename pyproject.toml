@@ -12,8 +12,10 @@ requires-python = ">=3.11"
 asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
-    "eval: search quality evaluation tests (require DB + embedding model)",
-    "integration: end-to-end pipeline tests (require DB + embedding model)",
+    "eval: search quality evaluation tests using golden dataset and ranking metrics",
+    "integration: end-to-end pipeline tests across API boundaries",
+    "security: security-focused tests (auth, injection, rate limiting)",
+    "performance: latency and concurrency benchmarks",
 ]
 
 [tool.ruff]
