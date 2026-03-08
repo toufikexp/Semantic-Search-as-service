@@ -164,9 +164,9 @@ def _fixed_chunk(
             )
             chunk_index += 1
 
-        start = end - char_overlap
-        if start >= len(text):
+        if end >= len(text):
             break
+        start = end - char_overlap
 
     return chunks
 

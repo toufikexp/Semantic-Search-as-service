@@ -64,23 +64,29 @@ def process_ingestion_job(self, job_id: str):
         errors = {}
         processed = 0
 
+        total = len(documents)
         for doc in documents:
             try:
                 _process_single_document(db, doc, collection)
                 processed += 1
+                logger.info(
+                    f"Job {job_id}: [{processed}/{total}] indexed {doc.external_id}"
+                )
             except Exception as e:
                 logger.exception(f"Failed to process document {doc.external_id}")
                 errors[doc.external_id] = str(e)
                 doc.status = "failed"
+            # Commit after each doc so progress survives crashes
+            job.processed_docs = job.processed_docs + 1
+            db.commit()
 
-        # Update job status
-        job.processed_docs = job.processed_docs + processed
+        # Final job status update
         job.failed_docs = len(errors)
         job.errors = errors
         job.status = "completed" if not errors else "completed_with_errors"
 
         # Update collection doc count
-        total_docs = (
+        indexed_count = (
             db.execute(
                 select(Document)
                 .where(
@@ -91,7 +97,7 @@ def process_ingestion_job(self, job_id: str):
             .scalars()
             .all()
         )
-        collection.doc_count = len(total_docs)
+        collection.doc_count = len(indexed_count)
 
         db.commit()
 

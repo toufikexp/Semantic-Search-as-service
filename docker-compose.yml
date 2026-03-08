@@ -96,6 +96,13 @@ services:
       resources:
         limits:
           memory: 4G
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.workers.celery_app inspect ping -d celery@$$HOSTNAME"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 120s
     depends_on:
       postgres:
         condition: service_healthy
