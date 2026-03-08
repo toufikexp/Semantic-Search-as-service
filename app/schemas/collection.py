@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 
 class CollectionCreate(BaseModel):
-    name: str = Field(..., max_length=255)
+    name: str = Field(..., min_length=1, max_length=255)
     description: str | None = None
     embedding_model: str = "bge-m3"
     language: str = "auto"

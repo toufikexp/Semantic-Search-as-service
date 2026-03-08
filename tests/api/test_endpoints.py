@@ -1,16 +1,29 @@
 """API endpoint contract tests — request/response shape validation."""
 
 import uuid
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+
+def _populate_server_defaults(obj):
+    """Simulate DB-generated defaults for server_default / default columns."""
+    if getattr(obj, "id", None) is None:
+        obj.id = uuid.uuid4()
+    if hasattr(obj, "status") and getattr(obj, "status", None) is None:
+        obj.status = "active"
+    if hasattr(obj, "created_at") and getattr(obj, "created_at", None) is None:
+        obj.created_at = datetime.now(timezone.utc)
+    if hasattr(obj, "updated_at") and getattr(obj, "updated_at", None) is None:
+        obj.updated_at = datetime.now(timezone.utc)
 
 
 class TestCollectionAPIContract:
     @patch("app.services.collection_service.generate_api_key")
     async def test_create_response_shape(self, mock_gen, search_client, fake_db):
         mock_gen.side_effect = [("sk_ingest_raw", "h1"), ("sk_search_raw", "h2")]
-        fake_db.refresh = AsyncMock(side_effect=lambda obj: None)
+        fake_db.refresh = AsyncMock(side_effect=_populate_server_defaults)
 
         resp = await search_client.post(
             "/api/v1/collections",
@@ -84,7 +97,7 @@ class TestDocumentAPIContract:
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
         fake_db.execute = AsyncMock(return_value=mock_result)
-        fake_db.refresh = AsyncMock(side_effect=lambda obj: None)
+        fake_db.refresh = AsyncMock(side_effect=_populate_server_defaults)
 
         resp = await ingest_client.post(
             f"/api/v1/collections/{collection_id}/documents",
@@ -119,7 +132,7 @@ class TestWebhookAPIContract:
     @patch("app.workers.tasks.run_crawl")
     async def test_crawl_response_shape(self, mock_crawl, ingest_client, fake_db, collection_id):
         mock_crawl.delay = MagicMock()
-        fake_db.refresh = AsyncMock(side_effect=lambda obj: None)
+        fake_db.refresh = AsyncMock(side_effect=_populate_server_defaults)
 
         resp = await ingest_client.post(
             f"/api/v1/collections/{collection_id}/crawl",

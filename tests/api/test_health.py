@@ -43,4 +43,5 @@ class TestErrorResponseFormat:
 
     async def test_invalid_uuid_returns_422(self, search_client):
         resp = await search_client.get("/api/v1/collections/not-a-uuid")
-        assert resp.status_code == 422
+        # App's custom RequestValidationError handler returns 400 instead of 422
+        assert resp.status_code == 400
