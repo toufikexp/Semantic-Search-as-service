@@ -90,12 +90,17 @@ services:
     environment:
       DATABASE_URL_SYNC: postgresql://postgres:${DB_PASSWORD:-changeme}@postgres:5432/semantic_search
       REDIS_URL: redis://redis:6379/0
-      EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
+      EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-auto}
     deploy:
       replicas: 1
       resources:
         limits:
           memory: 4G
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.workers.celery_app inspect ping -d celery@$$HOSTNAME"]

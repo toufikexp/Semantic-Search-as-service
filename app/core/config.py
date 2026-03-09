@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     # Embedding
     DEFAULT_EMBEDDING_MODEL: str = "bge-m3"
     EMBEDDING_BATCH_SIZE: int = 32
-    EMBEDDING_DEVICE: str = "cpu"
+    EMBEDDING_DEVICE: str = "auto"
     EMBEDDING_DIM: int = 1024
     EMBEDDING_CACHE_TTL: int = 3600  # seconds to cache query embeddings in Redis
     EMBEDDING_QUERY_TIMEOUT: int = 10  # seconds to wait for worker response

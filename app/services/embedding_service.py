@@ -10,6 +10,16 @@ logger = logging.getLogger(__name__)
 _model = None
 
 
+def _resolve_device() -> str:
+    """Resolve the embedding device: auto-detect CUDA if configured as 'auto'."""
+    device = settings.EMBEDDING_DEVICE
+    if device == "auto":
+        import torch
+
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    return device
+
+
 def _get_model():
     """Lazy-load the embedding model."""
     global _model
@@ -24,8 +34,9 @@ def _get_model():
         model_name = model_name_map.get(
             settings.DEFAULT_EMBEDDING_MODEL, settings.DEFAULT_EMBEDDING_MODEL
         )
-        logger.info(f"Loading embedding model: {model_name}")
-        _model = SentenceTransformer(model_name, device=settings.EMBEDDING_DEVICE)
+        device = _resolve_device()
+        logger.info(f"Loading embedding model: {model_name} on device: {device}")
+        _model = SentenceTransformer(model_name, device=device)
     return _model
 
 
