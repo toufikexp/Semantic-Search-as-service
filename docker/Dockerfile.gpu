@@ -25,7 +25,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Install PyTorch with CUDA 12.1 support first (overrides any CPU-only torch from requirements.txt)
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu121 \
+    && pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu130 \
     && pip install --no-cache-dir -r requirements.txt
 
 # Pre-download the embedding model at build time so the container

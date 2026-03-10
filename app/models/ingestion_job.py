@@ -17,7 +17,7 @@ class IngestionJob(Base):
     collection_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("collections.id"), nullable=False
     )
-    status: Mapped[str] = mapped_column(String(20), default="processing")
+    status: Mapped[str] = mapped_column(String(30), default="processing")
     total_docs: Mapped[int] = mapped_column(Integer, default=0)
     processed_docs: Mapped[int] = mapped_column(Integer, default=0)
     failed_docs: Mapped[int] = mapped_column(Integer, default=0)
