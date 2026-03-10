@@ -5,6 +5,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     environment:
+      TZ: Africa/Algiers
       POSTGRES_DB: semantic_search
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
@@ -24,6 +25,8 @@ services:
   redis:
     image: redis:7-alpine
     command: redis-server --maxmemory 4gb --maxmemory-policy allkeys-lru
+    environment:
+      TZ: Africa/Algiers
     volumes:
       - redisdata:/data
     ports:
@@ -41,6 +44,7 @@ services:
       dockerfile: docker/Dockerfile.api
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
     environment:
+      TZ: Africa/Algiers
       DATABASE_URL: postgresql+asyncpg://postgres:${DB_PASSWORD:-changeme}@postgres:5432/semantic_search
       DATABASE_URL_SYNC: postgresql://postgres:${DB_PASSWORD:-changeme}@postgres:5432/semantic_search
       REDIS_URL: redis://redis:6379/0
@@ -63,6 +67,7 @@ services:
       dockerfile: docker/Dockerfile.api
     command: uvicorn app.ingest:app --host 0.0.0.0 --port 8001 --workers 1
     environment:
+      TZ: Africa/Algiers
       DATABASE_URL: postgresql+asyncpg://postgres:${DB_PASSWORD:-changeme}@postgres:5432/semantic_search
       DATABASE_URL_SYNC: postgresql://postgres:${DB_PASSWORD:-changeme}@postgres:5432/semantic_search
       REDIS_URL: redis://redis:6379/0
@@ -88,6 +93,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.gpu
     environment:
+      TZ: Africa/Algiers
       DATABASE_URL_SYNC: postgresql://postgres:${DB_PASSWORD:-changeme}@postgres:5432/semantic_search
       REDIS_URL: redis://redis:6379/0
       EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-auto}
@@ -119,6 +125,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.crawler
     environment:
+      TZ: Africa/Algiers
       DATABASE_URL_SYNC: postgresql://postgres:${DB_PASSWORD:-changeme}@postgres:5432/semantic_search
       REDIS_URL: redis://redis:6379/0
     deploy:
@@ -137,6 +144,7 @@ services:
       dockerfile: docker/Dockerfile.api
     command: celery -A app.workers.celery_app beat --loglevel=info
     environment:
+      TZ: Africa/Algiers
       DATABASE_URL_SYNC: postgresql://postgres:${DB_PASSWORD:-changeme}@postgres:5432/semantic_search
       REDIS_URL: redis://redis:6379/0
     deploy:
@@ -153,6 +161,8 @@ services:
   # ── Gateway ──
   nginx:
     image: nginx:alpine
+    environment:
+      TZ: Africa/Algiers
     ports:
       - "80:80"
       - "443:443"
