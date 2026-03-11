@@ -200,53 +200,59 @@ def run_crawl(self, job_id: str, collection_id: str, crawl_config: dict):
     include_patterns = crawl_config.get("include_patterns", [])
     exclude_patterns = crawl_config.get("exclude_patterns", [])
 
+    if not sitemap_url:
+        logger.error(f"Crawl job {job_id}: sitemap_url is required")
+        _update_job_status(
+            job_id, "failed", errors={"sitemap": "sitemap_url is required"}
+        )
+        return
+
     urls = []
 
-    if sitemap_url:
-        try:
-            response = httpx.get(sitemap_url, timeout=30, follow_redirects=True)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.text, "lxml-xml")
+    try:
+        response = httpx.get(sitemap_url, timeout=30, follow_redirects=True)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "lxml-xml")
 
-            # Handle sitemap index files: if the sitemap contains <sitemap>
-            # entries, fetch each child sitemap to collect page URLs.
-            child_sitemaps = soup.find_all("sitemap")
-            if child_sitemaps:
-                for sm in child_sitemaps:
-                    loc = sm.find("loc")
-                    if not loc:
-                        continue
-                    try:
-                        child_resp = httpx.get(
-                            loc.text.strip(), timeout=30, follow_redirects=True
-                        )
-                        child_resp.raise_for_status()
-                        child_soup = BeautifulSoup(child_resp.text, "lxml-xml")
-                        for child_loc in child_soup.find_all("loc"):
-                            page_url = child_loc.text.strip()
-                            if _url_matches_patterns(
-                                page_url, include_patterns, exclude_patterns
-                            ):
-                                urls.append(page_url)
-                                if len(urls) >= max_pages:
-                                    break
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to fetch child sitemap {loc.text}: {e}"
-                        )
+        # Handle sitemap index files: if the sitemap contains <sitemap>
+        # entries, fetch each child sitemap to collect page URLs.
+        child_sitemaps = soup.find_all("sitemap")
+        if child_sitemaps:
+            for sm in child_sitemaps:
+                loc = sm.find("loc")
+                if not loc:
+                    continue
+                try:
+                    child_resp = httpx.get(
+                        loc.text.strip(), timeout=30, follow_redirects=True
+                    )
+                    child_resp.raise_for_status()
+                    child_soup = BeautifulSoup(child_resp.text, "lxml-xml")
+                    for child_loc in child_soup.find_all("loc"):
+                        page_url = child_loc.text.strip()
+                        if _url_matches_patterns(
+                            page_url, include_patterns, exclude_patterns
+                        ):
+                            urls.append(page_url)
+                            if len(urls) >= max_pages:
+                                break
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to fetch child sitemap {loc.text}: {e}"
+                    )
+                if len(urls) >= max_pages:
+                    break
+        else:
+            for loc in soup.find_all("loc"):
+                url = loc.text.strip()
+                if _url_matches_patterns(url, include_patterns, exclude_patterns):
+                    urls.append(url)
                     if len(urls) >= max_pages:
                         break
-            else:
-                for loc in soup.find_all("loc"):
-                    url = loc.text.strip()
-                    if _url_matches_patterns(url, include_patterns, exclude_patterns):
-                        urls.append(url)
-                        if len(urls) >= max_pages:
-                            break
-        except Exception as e:
-            logger.error(f"Failed to parse sitemap {sitemap_url}: {e}")
-            _update_job_status(job_id, "failed", errors={"sitemap": str(e)})
-            return
+    except Exception as e:
+        logger.error(f"Failed to parse sitemap {sitemap_url}: {e}")
+        _update_job_status(job_id, "failed", errors={"sitemap": str(e)})
+        return
 
     engine = _get_sync_engine()
     crawled = 0
