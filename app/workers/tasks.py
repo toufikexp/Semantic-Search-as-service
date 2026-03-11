@@ -207,51 +207,29 @@ def run_crawl(self, job_id: str, collection_id: str, crawl_config: dict):
         )
         return
 
-    urls = []
+    urls = _discover_urls_from_sitemap(
+        sitemap_url, max_pages, include_patterns, exclude_patterns
+    )
 
-    try:
-        response = httpx.get(sitemap_url, timeout=30, follow_redirects=True)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, "lxml-xml")
+    # Fallback: if sitemap yielded no URLs, crawl by following links from the
+    # base domain.  This handles sites whose sitemap index children are broken
+    # or return errors (e.g. ooredoo.dz).
+    if not urls:
+        from urllib.parse import urlparse
 
-        # Handle sitemap index files: if the sitemap contains <sitemap>
-        # entries, fetch each child sitemap to collect page URLs.
-        child_sitemaps = soup.find_all("sitemap")
-        if child_sitemaps:
-            for sm in child_sitemaps:
-                loc = sm.find("loc")
-                if not loc:
-                    continue
-                try:
-                    child_resp = httpx.get(
-                        loc.text.strip(), timeout=30, follow_redirects=True
-                    )
-                    child_resp.raise_for_status()
-                    child_soup = BeautifulSoup(child_resp.text, "lxml-xml")
-                    for child_loc in child_soup.find_all("loc"):
-                        page_url = child_loc.text.strip()
-                        if _url_matches_patterns(
-                            page_url, include_patterns, exclude_patterns
-                        ):
-                            urls.append(page_url)
-                            if len(urls) >= max_pages:
-                                break
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to fetch child sitemap {loc.text}: {e}"
-                    )
-                if len(urls) >= max_pages:
-                    break
-        else:
-            for loc in soup.find_all("loc"):
-                url = loc.text.strip()
-                if _url_matches_patterns(url, include_patterns, exclude_patterns):
-                    urls.append(url)
-                    if len(urls) >= max_pages:
-                        break
-    except Exception as e:
-        logger.error(f"Failed to parse sitemap {sitemap_url}: {e}")
-        _update_job_status(job_id, "failed", errors={"sitemap": str(e)})
+        parsed = urlparse(sitemap_url)
+        base_url = f"{parsed.scheme}://{parsed.netloc}"
+        logger.info(
+            f"Crawl job {job_id}: sitemap yielded 0 URLs, "
+            f"falling back to link crawl from {base_url}"
+        )
+        urls = _discover_urls_by_crawling(
+            base_url, max_pages, include_patterns, exclude_patterns
+        )
+
+    if not urls:
+        logger.warning(f"Crawl job {job_id}: no URLs discovered")
+        _update_job_status(job_id, "completed", errors={"discovery": "0 URLs found"})
         return
 
     engine = _get_sync_engine()
@@ -428,6 +406,144 @@ def cleanup_search_logs():
         db.commit()
 
     logger.info("Cleaned up old search logs")
+
+
+def _discover_urls_from_sitemap(
+    sitemap_url: str,
+    max_pages: int,
+    include_patterns: list[str],
+    exclude_patterns: list[str],
+) -> list[str]:
+    """Parse a sitemap (or sitemap index) and return discovered page URLs."""
+    import httpx
+    from bs4 import BeautifulSoup
+
+    urls: list[str] = []
+    try:
+        response = httpx.get(sitemap_url, timeout=30, follow_redirects=True)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "lxml-xml")
+
+        child_sitemaps = soup.find_all("sitemap")
+        if child_sitemaps:
+            for sm in child_sitemaps:
+                loc = sm.find("loc")
+                if not loc:
+                    continue
+                try:
+                    child_resp = httpx.get(
+                        loc.text.strip(), timeout=30, follow_redirects=True
+                    )
+                    child_resp.raise_for_status()
+                    child_soup = BeautifulSoup(child_resp.text, "lxml-xml")
+                    for child_loc in child_soup.find_all("loc"):
+                        page_url = child_loc.text.strip()
+                        if _url_matches_patterns(
+                            page_url, include_patterns, exclude_patterns
+                        ):
+                            urls.append(page_url)
+                            if len(urls) >= max_pages:
+                                break
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to fetch child sitemap {loc.text}: {e}"
+                    )
+                if len(urls) >= max_pages:
+                    break
+        else:
+            for loc in soup.find_all("loc"):
+                url = loc.text.strip()
+                if _url_matches_patterns(url, include_patterns, exclude_patterns):
+                    urls.append(url)
+                    if len(urls) >= max_pages:
+                        break
+    except Exception as e:
+        logger.error(f"Failed to parse sitemap {sitemap_url}: {e}")
+
+    return urls
+
+
+def _discover_urls_by_crawling(
+    base_url: str,
+    max_pages: int,
+    include_patterns: list[str],
+    exclude_patterns: list[str],
+) -> list[str]:
+    """Discover pages by following links starting from base_url (BFS crawl)."""
+    import time
+    from collections import deque
+    from urllib.parse import urljoin, urlparse
+
+    import httpx
+    from bs4 import BeautifulSoup
+
+    parsed_base = urlparse(base_url)
+    base_domain = parsed_base.netloc
+
+    visited: set[str] = set()
+    queue: deque[str] = deque([base_url])
+    discovered: list[str] = []
+    crawl_delay = settings.CRAWL_DELAY_SECONDS
+
+    while queue and len(discovered) < max_pages:
+        current_url = queue.popleft()
+        if current_url in visited:
+            continue
+        visited.add(current_url)
+
+        try:
+            resp = httpx.get(
+                current_url,
+                timeout=30,
+                follow_redirects=True,
+                headers={"User-Agent": "SemanticSearchBot/1.0"},
+            )
+            resp.raise_for_status()
+        except Exception as e:
+            logger.debug(f"Link crawl: failed to fetch {current_url}: {e}")
+            continue
+
+        content_type = resp.headers.get("content-type", "")
+        if "text/html" not in content_type:
+            continue
+
+        if _url_matches_patterns(current_url, include_patterns, exclude_patterns):
+            discovered.append(current_url)
+
+        # Extract links for further crawling
+        try:
+            soup = BeautifulSoup(resp.text, "html.parser")
+            for anchor in soup.find_all("a", href=True):
+                href = anchor["href"]
+                absolute = urljoin(current_url, href)
+                # Strip fragments
+                absolute = absolute.split("#")[0]
+                parsed = urlparse(absolute)
+                # Stay on the same domain, skip non-http(s) schemes
+                if parsed.netloc != base_domain:
+                    continue
+                if parsed.scheme not in ("http", "https"):
+                    continue
+                # Skip common non-page extensions
+                path_lower = parsed.path.lower()
+                if any(
+                    path_lower.endswith(ext)
+                    for ext in (".pdf", ".zip", ".jpg", ".png", ".gif", ".css", ".js")
+                ):
+                    continue
+                if absolute not in visited:
+                    queue.append(absolute)
+        except Exception as e:
+            logger.debug(f"Link crawl: failed to parse links from {current_url}: {e}")
+
+        if crawl_delay > 0:
+            time.sleep(crawl_delay)
+
+    logger.info(
+        f"Link crawl: discovered {len(discovered)} pages "
+        f"(visited {len(visited)} URLs)"
+    )
+    return discovered
 
 
 def _url_matches_patterns(

@@ -26,7 +26,9 @@ class CrawlRequest(BaseModel):
         description=(
             "URL to a sitemap.xml file, or a base website URL. "
             "If a base URL is provided (e.g. https://example.com), "
-            "/sitemap.xml is appended automatically."
+            "/sitemap.xml is appended automatically. If the sitemap "
+            "yields no URLs (e.g. broken child sitemaps), the crawler "
+            "falls back to link-based discovery from the base domain."
         ),
     )
     max_pages: int = Field(default=500, ge=1, le=10000)
