@@ -232,10 +232,35 @@ def run_crawl(self, job_id: str, collection_id: str, crawl_config: dict):
         _update_job_status(job_id, "completed", errors={"discovery": "0 URLs found"})
         return
 
+    # --- Deduplicate URLs using normalized form ---
+    raw_count = len(urls)
+    urls = _deduplicate_urls(urls)
+    if len(urls) < raw_count:
+        logger.info(
+            f"Crawl job {job_id}: deduplicated {raw_count} → {len(urls)} unique URLs"
+        )
+
     engine = _get_sync_engine()
     crawled = 0
+    skipped_unchanged = 0
 
     with Session(engine) as db:
+        # Pre-load content hashes for already-indexed docs so we can skip
+        # pages whose content hasn't changed since the last crawl.
+        existing_hashes: dict[str, str] = {}
+        existing_docs = (
+            db.execute(
+                select(Document.external_id, Document.content_hash).where(
+                    Document.collection_id == collection_id,
+                    Document.status == "indexed",
+                )
+            )
+            .all()
+        )
+        for ext_id, c_hash in existing_docs:
+            if c_hash:
+                existing_hashes[ext_id] = c_hash
+
         for url in urls:
             try:
                 response = httpx.get(url, timeout=30, follow_redirects=True)
@@ -255,6 +280,11 @@ def run_crawl(self, job_id: str, collection_id: str, crawl_config: dict):
 
                 content_hash = hashlib.sha256(content.encode()).hexdigest()
                 external_id = hashlib.md5(url.encode()).hexdigest()
+
+                # Skip if the page content is identical to what's already indexed
+                if existing_hashes.get(external_id) == content_hash:
+                    skipped_unchanged += 1
+                    continue
 
                 doc = Document(
                     collection_id=collection_id,
@@ -282,7 +312,10 @@ def run_crawl(self, job_id: str, collection_id: str, crawl_config: dict):
 
         db.commit()
 
-    logger.info(f"Crawl job {job_id}: crawled {crawled} pages from {len(urls)} URLs")
+    logger.info(
+        f"Crawl job {job_id}: crawled {crawled} new/updated pages from {len(urls)} URLs"
+        f" ({skipped_unchanged} unchanged, skipped)"
+    )
 
     # Trigger ingestion processing for crawled documents
     if crawled > 0:
@@ -408,6 +441,34 @@ def cleanup_search_logs():
     logger.info("Cleaned up old search logs")
 
 
+def _normalize_url(url: str) -> str:
+    """Normalize a URL to prevent duplicates caused by cosmetic differences."""
+    from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
+
+    parsed = urlparse(url)
+    # Lowercase scheme and host
+    scheme = parsed.scheme.lower()
+    netloc = parsed.netloc.lower()
+    # Remove trailing slash (except for root path)
+    path = parsed.path.rstrip("/") if parsed.path != "/" else "/"
+    # Sort query params for consistent ordering
+    query = urlencode(sorted(parse_qsl(parsed.query)))
+    # Drop fragment
+    return urlunparse((scheme, netloc, path, parsed.params, query, ""))
+
+
+def _deduplicate_urls(urls: list[str]) -> list[str]:
+    """Remove duplicate URLs after normalization, preserving order."""
+    seen: set[str] = set()
+    unique: list[str] = []
+    for url in urls:
+        normalized = _normalize_url(url)
+        if normalized not in seen:
+            seen.add(normalized)
+            unique.append(url)
+    return unique
+
+
 def _discover_urls_from_sitemap(
     sitemap_url: str,
     max_pages: int,
@@ -487,9 +548,10 @@ def _discover_urls_by_crawling(
 
     while queue and len(discovered) < max_pages:
         current_url = queue.popleft()
-        if current_url in visited:
+        normalized = _normalize_url(current_url)
+        if normalized in visited:
             continue
-        visited.add(current_url)
+        visited.add(normalized)
 
         try:
             resp = httpx.get(
@@ -531,7 +593,7 @@ def _discover_urls_by_crawling(
                     for ext in (".pdf", ".zip", ".jpg", ".png", ".gif", ".css", ".js")
                 ):
                     continue
-                if absolute not in visited:
+                if _normalize_url(absolute) not in visited:
                     queue.append(absolute)
         except Exception as e:
             logger.debug(f"Link crawl: failed to parse links from {current_url}: {e}")
