@@ -32,8 +32,27 @@ def chunk_text(
 
 
 def _estimate_tokens(text: str) -> int:
-    """Rough token count estimation (~4 chars per token)."""
-    return len(text) // 4
+    """Rough token count estimation, adjusted for script type.
+
+    Latin-based scripts average ~4 characters per token.
+    CJK, Arabic, Thai, Devanagari, and other non-Latin scripts average
+    ~1.5–2 characters per token because each character carries more meaning.
+    We count characters by category and blend the two estimates.
+    """
+    latin_chars = 0
+    non_latin_chars = 0
+    for ch in text:
+        if ch.isspace():
+            continue
+        # ASCII letters, digits, and common Latin punctuation
+        if ch.isascii():
+            latin_chars += 1
+        else:
+            non_latin_chars += 1
+
+    # Latin: ~4 chars/token, non-Latin: ~2 chars/token
+    tokens = (latin_chars / 4) + (non_latin_chars / 2)
+    return max(1, int(tokens)) if text.strip() else 0
 
 
 def _adaptive_chunk(text: str, max_tokens: int = 512) -> list[ChunkResult]:
@@ -137,12 +156,35 @@ def _split_by_paragraphs(
     return chunks
 
 
+def _chars_per_token(text: str) -> float:
+    """Estimate the average characters-per-token ratio for the given text.
+
+    Returns ~4 for pure Latin text and ~2 for pure non-Latin text,
+    blending proportionally for mixed content.
+    """
+    latin = 0
+    non_latin = 0
+    for ch in text:
+        if ch.isspace():
+            continue
+        if ch.isascii():
+            latin += 1
+        else:
+            non_latin += 1
+    total = latin + non_latin
+    if total == 0:
+        return 4.0
+    # Weighted average: Latin chars ≈ 4 c/t, non-Latin ≈ 2 c/t
+    return (latin * 4.0 + non_latin * 2.0) / total
+
+
 def _fixed_chunk(
     text: str, chunk_size: int = 512, overlap: int = 50
 ) -> list[ChunkResult]:
     """Sliding window chunking by character count (token-approximate)."""
-    char_chunk_size = chunk_size * 4  # ~4 chars per token
-    char_overlap = overlap * 4
+    cpt = _chars_per_token(text)
+    char_chunk_size = int(chunk_size * cpt)
+    char_overlap = int(overlap * cpt)
     chunks = []
     start = 0
     chunk_index = 0
@@ -172,8 +214,12 @@ def _fixed_chunk(
 
 
 def _sentence_chunk(text: str, max_tokens: int = 512) -> list[ChunkResult]:
-    """Split by sentence boundaries."""
-    sentences = re.split(r"(?<=[.!?])\s+", text)
+    """Split by sentence boundaries.
+
+    Supports Latin (.!?), Arabic (؟ ، ؛), CJK (。！？), Thai (ฯ),
+    and other common sentence-ending punctuation.
+    """
+    sentences = re.split(r"(?<=[.!?\u061F\u060C\u061B\u06D4\u3002\uFF01\uFF1F\u0E2F])\s+", text)
     chunks = []
     current = ""
     current_start = 0

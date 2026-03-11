@@ -20,12 +20,58 @@ from app.schemas.search import (
 
 logger = logging.getLogger(__name__)
 
+# Map collection language values to PostgreSQL text search configurations.
+# Languages without a dedicated PostgreSQL dictionary fall back to 'simple'
+# (whitespace tokenisation, lowercasing, no stemming).
+_PG_TSCONFIG_MAP: dict[str, str] = {
+    "auto": "simple",
+    "simple": "simple",
+    "en": "english",
+    "english": "english",
+    "fr": "french",
+    "french": "french",
+    "ar": "simple",
+    "arabic": "simple",
+    "de": "german",
+    "german": "german",
+    "es": "spanish",
+    "spanish": "spanish",
+    "it": "italian",
+    "italian": "italian",
+    "pt": "portuguese",
+    "portuguese": "portuguese",
+    "nl": "dutch",
+    "dutch": "dutch",
+    "ru": "russian",
+    "russian": "russian",
+    "sv": "swedish",
+    "swedish": "swedish",
+    "tr": "turkish",
+    "turkish": "turkish",
+    "da": "danish",
+    "danish": "danish",
+    "fi": "finnish",
+    "finnish": "finnish",
+    "hu": "hungarian",
+    "hungarian": "hungarian",
+    "no": "norwegian",
+    "norwegian": "norwegian",
+    "ro": "romanian",
+    "romanian": "romanian",
+}
+
+
+def _get_pg_tsconfig(language: str) -> str:
+    """Return the PostgreSQL text search configuration name for a language."""
+    return _PG_TSCONFIG_MAP.get(language.lower().strip(), "simple")
+
 
 async def execute_search(
     db: AsyncSession,
     collection_id: uuid.UUID,
     request: SearchRequest,
     query_vector: list[float] | None = None,
+    language: str = "auto",
 ) -> SearchResponse:
     """Execute a search query against a collection."""
     start_time = time.monotonic()
@@ -41,7 +87,9 @@ async def execute_search(
             )
 
         if request.mode in ("keyword", "hybrid"):
-            keyword_results = await _keyword_search(db, collection_id, request)
+            keyword_results = await _keyword_search(
+                db, collection_id, request, language=language
+            )
             if request.mode == "hybrid" and results:
                 results = _merge_results(results, keyword_results)
             elif not results:
@@ -153,12 +201,13 @@ async def _keyword_search(
     db: AsyncSession,
     collection_id: uuid.UUID,
     request: SearchRequest,
+    language: str = "auto",
 ) -> list[SearchResult]:
     """Perform full-text search using PostgreSQL tsvector."""
     limit = request.offset + request.limit
-    tsquery = " & ".join(request.query.split())
+    tsconfig = _get_pg_tsconfig(language)
 
-    sql = text("""
+    sql = text(f"""
         SELECT
             d.id AS doc_id,
             d.external_id,
@@ -166,20 +215,20 @@ async def _keyword_search(
             d.url,
             d.metadata,
             ts_rank(
-                to_tsvector('english', coalesce(d.title, '') || ' ' || d.content),
-                plainto_tsquery('english', :query)
+                to_tsvector('{tsconfig}', coalesce(d.title, '') || ' ' || d.content),
+                plainto_tsquery('{tsconfig}', :query)
             ) AS score,
             ts_headline(
-                'english',
+                '{tsconfig}',
                 d.content,
-                plainto_tsquery('english', :query),
+                plainto_tsquery('{tsconfig}', :query),
                 'MaxWords=50, MinWords=20, StartSel=<em>, StopSel=</em>'
             ) AS highlight
         FROM documents d
         WHERE d.collection_id = :collection_id
           AND d.status = 'indexed'
-          AND to_tsvector('english', coalesce(d.title, '') || ' ' || d.content)
-              @@ plainto_tsquery('english', :query)
+          AND to_tsvector('{tsconfig}', coalesce(d.title, '') || ' ' || d.content)
+              @@ plainto_tsquery('{tsconfig}', :query)
         ORDER BY score DESC
         LIMIT :limit
     """)

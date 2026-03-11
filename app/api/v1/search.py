@@ -12,7 +12,7 @@ from app.schemas.search import (
     SuggestRequest,
     SuggestResponse,
 )
-from app.services import search_service
+from app.services import collection_service, search_service
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +63,12 @@ async def search_collection(
                 "Falling back to keyword-only search for hybrid query"
             )
 
+    # Fetch collection language for keyword/hybrid text search config
+    collection = await collection_service.get_collection(db, collection_id)
+    language = collection.language if collection else "auto"
+
     return await search_service.execute_search(
-        db, collection_id, body, query_vector
+        db, collection_id, body, query_vector, language=language
     )
 
 

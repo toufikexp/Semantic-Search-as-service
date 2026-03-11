@@ -21,6 +21,7 @@ class CollectionUpdate(BaseModel):
     metadata_schema: dict | None = None
     embedding_model: str | None = None
     chunk_strategy: str | None = None
+    language: str | None = None
 
 
 class CollectionApiKeys(BaseModel):
