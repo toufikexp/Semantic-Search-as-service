@@ -66,6 +66,29 @@ def _get_pg_tsconfig(language: str) -> str:
     return _PG_TSCONFIG_MAP.get(language.lower().strip(), "simple")
 
 
+def _build_metadata_filter_clauses(
+    filters: dict,
+) -> tuple[str, dict[str, str]]:
+    """Build SQL WHERE clauses and bind params for metadata JSONB filtering.
+
+    Returns a tuple of (sql_fragment, params_dict).  The sql_fragment is empty
+    when there are no filters so callers can safely concatenate it.
+    """
+    if not filters:
+        return "", {}
+
+    clauses: list[str] = []
+    params: dict[str, str] = {}
+    for idx, (key, value) in enumerate(filters.items()):
+        param_key = f"filter_key_{idx}"
+        param_val = f"filter_val_{idx}"
+        clauses.append(f"AND d.metadata->>:{param_key} = :{param_val}")
+        params[param_key] = str(key)
+        params[param_val] = str(value)
+
+    return "\n          ".join(clauses), params
+
+
 async def execute_search(
     db: AsyncSession,
     collection_id: uuid.UUID,
@@ -143,7 +166,9 @@ async def _vector_search(
     vector_str = "[" + ",".join(str(v) for v in query_vector) + "]"
     limit = request.offset + request.limit
 
-    sql = text("""
+    filter_sql, filter_params = _build_metadata_filter_clauses(request.filters)
+
+    sql = text(f"""
         SELECT
             d.id AS doc_id,
             d.external_id,
@@ -157,6 +182,7 @@ async def _vector_search(
         JOIN documents d ON d.id = c.document_id
         WHERE e.collection_id = :collection_id
           AND d.status = 'indexed'
+          {filter_sql}
         ORDER BY e.vector <=> CAST(:query_vector AS vector)
         LIMIT :limit
     """)
@@ -167,6 +193,7 @@ async def _vector_search(
             "query_vector": vector_str,
             "collection_id": str(collection_id),
             "limit": limit,
+            **filter_params,
         },
     )
     rows = result.fetchall()
@@ -207,6 +234,8 @@ async def _keyword_search(
     limit = request.offset + request.limit
     tsconfig = _get_pg_tsconfig(language)
 
+    filter_sql, filter_params = _build_metadata_filter_clauses(request.filters)
+
     sql = text(f"""
         SELECT
             d.id AS doc_id,
@@ -229,6 +258,7 @@ async def _keyword_search(
           AND d.status = 'indexed'
           AND to_tsvector('{tsconfig}', coalesce(d.title, '') || ' ' || d.content)
               @@ plainto_tsquery('{tsconfig}', :query)
+          {filter_sql}
         ORDER BY score DESC
         LIMIT :limit
     """)
@@ -239,6 +269,7 @@ async def _keyword_search(
             "query": request.query,
             "collection_id": str(collection_id),
             "limit": limit,
+            **filter_params,
         },
     )
     rows = result.fetchall()
@@ -322,23 +353,26 @@ async def _compute_facets(
     request: SearchRequest,
 ) -> dict[str, list[FacetValue]]:
     """Compute facet counts from matching documents."""
+    filter_sql, filter_params = _build_metadata_filter_clauses(request.filters)
+    # _compute_facets uses alias "d" to be consistent with filter clauses
     facets = {}
     for facet_field in request.facets:
-        sql = text("""
+        sql = text(f"""
             SELECT
-                metadata->>:field AS value,
+                d.metadata->>:field AS value,
                 COUNT(*) AS count
-            FROM documents
-            WHERE collection_id = :collection_id
-              AND status = 'indexed'
-              AND metadata ? :field
-            GROUP BY metadata->>:field
+            FROM documents d
+            WHERE d.collection_id = :collection_id
+              AND d.status = 'indexed'
+              AND d.metadata ? :field
+              {filter_sql}
+            GROUP BY d.metadata->>:field
             ORDER BY count DESC
             LIMIT 20
         """)
         result = await db.execute(
             sql,
-            {"field": facet_field, "collection_id": str(collection_id)},
+            {"field": facet_field, "collection_id": str(collection_id), **filter_params},
         )
         facets[facet_field] = [
             FacetValue(value=row.value, count=row.count)
