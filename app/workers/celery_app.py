@@ -28,6 +28,10 @@ celery_app.conf.update(
             "task": "app.workers.tasks.cleanup_search_logs",
             "schedule": 86400.0,  # daily
         },
+        "check-stuck-jobs": {
+            "task": "app.workers.tasks.check_stuck_jobs",
+            "schedule": 900.0,  # every 15 minutes
+        },
     },
 )
 

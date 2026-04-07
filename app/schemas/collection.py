@@ -1,7 +1,9 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from urllib.parse import urlparse
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class CollectionCreate(BaseModel):
@@ -13,6 +15,18 @@ class CollectionCreate(BaseModel):
     chunk_size: int = 512
     chunk_overlap: int = 50
     metadata_schema: dict = Field(default_factory=dict)
+    callback_url: str | None = None
+    callback_secret: str | None = None
+
+    @field_validator("callback_url")
+    @classmethod
+    def validate_callback_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        parsed = urlparse(v)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError("callback_url must be a valid HTTP or HTTPS URL")
+        return v
 
 
 class CollectionUpdate(BaseModel):
@@ -22,6 +36,18 @@ class CollectionUpdate(BaseModel):
     embedding_model: str | None = None
     chunk_strategy: str | None = None
     language: str | None = None
+    callback_url: str | None = None
+    callback_secret: str | None = None
+
+    @field_validator("callback_url")
+    @classmethod
+    def validate_callback_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        parsed = urlparse(v)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError("callback_url must be a valid HTTP or HTTPS URL")
+        return v
 
 
 class CollectionApiKeys(BaseModel):
@@ -39,6 +65,7 @@ class CollectionResponse(BaseModel):
     language: str
     doc_count: int
     metadata_schema: dict
+    callback_url: str | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -23,6 +23,8 @@ async def create_collection(
         chunk_size=data.chunk_size,
         chunk_overlap=data.chunk_overlap,
         metadata_schema=data.metadata_schema,
+        callback_url=data.callback_url,
+        callback_secret=data.callback_secret,
     )
     db.add(collection)
     await db.flush()

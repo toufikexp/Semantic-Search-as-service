@@ -1,3 +1,6 @@
+import hashlib
+import hmac
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -25,6 +28,99 @@ def _get_sync_engine():
     if _sync_engine is None:
         _sync_engine = create_engine(settings.DATABASE_URL_SYNC, pool_size=5)
     return _sync_engine
+
+
+def _send_callback(collection_id: str, job_id: str) -> None:
+    """Send a completion callback to the collection's callback_url if configured.
+
+    Loads collection and job fresh from DB, builds a payload with per-document
+    status, signs it with HMAC-SHA256 if a secret is configured, and POSTs it.
+    Retries up to 3 times on failure.  Never raises — failures are logged only.
+    """
+    import httpx
+
+    engine = _get_sync_engine()
+    with Session(engine) as db:
+        collection = db.execute(
+            select(Collection).where(Collection.id == collection_id)
+        ).scalar_one_or_none()
+
+        if not collection or not collection.callback_url:
+            return
+
+        job = db.execute(
+            select(IngestionJob).where(IngestionJob.id == job_id)
+        ).scalar_one_or_none()
+
+        if not job:
+            return
+
+        # Build per-document status list
+        docs = (
+            db.execute(
+                select(Document.external_id, Document.status).where(
+                    Document.collection_id == collection_id,
+                    Document.status.in_(["indexed", "failed"]),
+                )
+            )
+            .all()
+        )
+
+        doc_statuses = []
+        for ext_id, status in docs:
+            entry = {"external_id": ext_id, "status": status}
+            if status == "failed" and job.errors and ext_id in job.errors:
+                entry["error"] = job.errors[ext_id]
+            doc_statuses.append(entry)
+
+        payload = {
+            "event": "ingestion.completed",
+            "job_id": str(job.id),
+            "collection_id": str(collection.id),
+            "status": job.status,
+            "total_docs": job.total_docs,
+            "processed_docs": job.processed_docs,
+            "failed_docs": job.failed_docs,
+            "documents": doc_statuses,
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    # Build headers
+    headers = {"Content-Type": "application/json"}
+    if collection.callback_secret:
+        payload_bytes = json.dumps(payload, sort_keys=True).encode()
+        signature = hmac.new(
+            collection.callback_secret.encode(), payload_bytes, hashlib.sha256
+        ).hexdigest()
+        headers["X-Webhook-Signature"] = f"sha256={signature}"
+
+    # Send with retry (outside the DB session)
+    for attempt in range(1, 4):
+        try:
+            resp = httpx.post(
+                collection.callback_url,
+                json=payload,
+                headers=headers,
+                timeout=10,
+            )
+            if resp.is_success:
+                logger.info(
+                    f"Callback sent for job {job_id} to {collection.callback_url}"
+                )
+                return
+            logger.warning(
+                f"Callback attempt {attempt}/3 for job {job_id} "
+                f"returned {resp.status_code}"
+            )
+        except Exception as e:
+            logger.warning(
+                f"Callback attempt {attempt}/3 for job {job_id} failed: {e}"
+            )
+
+    logger.error(
+        f"Callback failed after 3 attempts for job {job_id} "
+        f"to {collection.callback_url}"
+    )
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=5)
@@ -100,6 +196,8 @@ def process_ingestion_job(self, job_id: str):
         collection.doc_count = len(indexed_count)
 
         db.commit()
+
+    _send_callback(str(collection.id), str(job.id))
 
     logger.info(
         f"Job {job_id} completed: {processed} processed, {len(errors)} errors"
@@ -396,6 +494,9 @@ def process_crawled_documents(job_id: str, collection_id: str):
 
         db.commit()
 
+    if job:
+        _send_callback(str(collection_id), str(job.id))
+
     logger.info(
         f"Crawl ingestion job {job_id}: {processed} processed, {len(errors)} errors"
     )
@@ -404,6 +505,7 @@ def process_crawled_documents(job_id: str, collection_id: str):
 def _update_job_status(job_id: str, status: str, errors: dict | None = None):
     """Helper to update an IngestionJob status from any task."""
     engine = _get_sync_engine()
+    collection_id = None
     with Session(engine) as db:
         job = db.execute(
             select(IngestionJob).where(IngestionJob.id == job_id)
@@ -412,7 +514,12 @@ def _update_job_status(job_id: str, status: str, errors: dict | None = None):
             job.status = status
             if errors:
                 job.errors = errors
+            collection_id = str(job.collection_id)
             db.commit()
+
+    # Fire callback for terminal states (after DB session is closed)
+    if collection_id and status in ("completed", "completed_with_errors", "failed"):
+        _send_callback(collection_id, job_id)
 
 
 @celery_app.task
@@ -439,6 +546,41 @@ def cleanup_search_logs():
         db.commit()
 
     logger.info("Cleaned up old search logs")
+
+
+@celery_app.task
+def check_stuck_jobs():
+    """Detect jobs stuck in processing/crawling for over 1 hour.
+
+    Marks them as failed and fires the ingestion callback so clients are
+    notified rather than polling forever.
+    """
+    from datetime import timedelta
+
+    engine = _get_sync_engine()
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+
+    with Session(engine) as db:
+        stuck_jobs = (
+            db.execute(
+                select(IngestionJob).where(
+                    IngestionJob.status.in_(["processing", "crawling"]),
+                    IngestionJob.updated_at < cutoff,
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        for job in stuck_jobs:
+            logger.warning(f"Marking stuck job {job.id} as failed (last update: {job.updated_at})")
+            job.status = "failed"
+            job.errors = {"system": "Job timed out after 1 hour with no progress"}
+            db.commit()
+            _send_callback(str(job.collection_id), str(job.id))
+
+    if stuck_jobs:
+        logger.info(f"Marked {len(stuck_jobs)} stuck jobs as failed")
 
 
 def _normalize_url(url: str) -> str:
