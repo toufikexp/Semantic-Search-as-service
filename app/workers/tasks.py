@@ -145,6 +145,11 @@ def process_ingestion_job(self, job_id: str):
             logger.error(f"Collection {job.collection_id} not found for job {job_id}")
             return
 
+        # Capture the collection id as a plain string up front so we can
+        # use it after the session closes (ORM instances become detached
+        # on exit and expired attribute access would raise).
+        collection_id_str = str(collection.id)
+
         # Get all pending documents for this collection
         documents = (
             db.execute(
@@ -197,7 +202,10 @@ def process_ingestion_job(self, job_id: str):
 
         db.commit()
 
-    _send_callback(str(collection.id), str(job.id))
+    # job_id is already a string (task parameter); collection_id_str was
+    # captured above. Calling _send_callback after the session is closed
+    # is safe because it opens its own fresh session internally.
+    _send_callback(collection_id_str, job_id)
 
     logger.info(
         f"Job {job_id} completed: {processed} processed, {len(errors)} errors"
@@ -492,10 +500,16 @@ def process_crawled_documents(job_id: str, collection_id: str):
             .all()
         ).__len__()
 
+        # Capture the primitive "job exists" flag before the session closes
+        # to avoid DetachedInstanceError when calling _send_callback below.
+        had_job = job is not None
+
         db.commit()
 
-    if job:
-        _send_callback(str(collection_id), str(job.id))
+    if had_job:
+        # collection_id and job_id are already strings (task parameters),
+        # so no ORM attribute access is needed here.
+        _send_callback(collection_id, job_id)
 
     logger.info(
         f"Crawl ingestion job {job_id}: {processed} processed, {len(errors)} errors"
