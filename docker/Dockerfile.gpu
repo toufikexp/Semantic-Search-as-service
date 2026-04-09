@@ -28,17 +28,21 @@ RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu130 \
     && pip install --no-cache-dir -r requirements.txt
 
-# Pre-download the embedding model at build time so the container
-# never needs internet access at runtime.
-RUN python -c "\
-from sentence_transformers import SentenceTransformer; \
-SentenceTransformer('BAAI/bge-m3')"
+# Pre-download the embedding model at build time into a stable shared
+# path (HF_HOME=/opt/hf-cache) so both root (build) and appuser (runtime)
+# can find it.  The container then never needs internet access at runtime.
+ENV HF_HOME=/opt/hf-cache
+RUN mkdir -p /opt/hf-cache \
+    && python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-m3')"
 
 # Application code
 COPY . .
 
-# Non-root user
-RUN useradd -m appuser && chown -R appuser:appuser /app
+# Non-root user.  Grant read access to the model cache so sentence-transformers
+# can load BGE-M3 from /opt/hf-cache at runtime.
+RUN useradd -m appuser \
+    && chown -R appuser:appuser /app \
+    && chown -R appuser:appuser /opt/hf-cache
 USER appuser
 
 CMD ["celery", "-A", "app.workers.celery_app", "worker", "-Q", "embeddings", "--loglevel=info", "--pool=solo"]

@@ -97,6 +97,12 @@ services:
       DATABASE_URL_SYNC: postgresql://postgres:${DB_PASSWORD:-changeme}@postgres:5432/semantic_search
       REDIS_URL: redis://redis:6379/0
       EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-auto}
+      # Force fully-offline model loading. The BGE-M3 weights are baked
+      # into the image at /opt/hf-cache, so no network access is ever
+      # required. This also guarantees immunity to huggingface.co outages.
+      HF_HOME: /opt/hf-cache
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
     deploy:
       replicas: 1
       resources:
