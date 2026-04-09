@@ -4,6 +4,7 @@ import uuid
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 
@@ -39,6 +40,36 @@ Instrumentator().instrument(app).expose(app)
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
 logger = logging.getLogger(__name__)
+
+
+def custom_openapi():
+    """Inject a Bearer-token security scheme into the generated OpenAPI
+    document so the Swagger UI 'Authorize' button works and SDK generators
+    know every endpoint requires `Authorization: Bearer <api_key>`."""
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    schema.setdefault("components", {})["securitySchemes"] = {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "description": (
+                "Provide your API key as `Authorization: Bearer <api_key>`. "
+                "Keys are scoped to `master`, `ingest`, or `search`."
+            ),
+        }
+    }
+    schema["security"] = [{"BearerAuth": []}]
+    app.openapi_schema = schema
+    return schema
+
+
+app.openapi = custom_openapi
 
 
 @app.on_event("startup")

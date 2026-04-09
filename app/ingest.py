@@ -5,6 +5,7 @@ import uuid
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 
@@ -18,7 +19,13 @@ logging.basicConfig(
 
 app = FastAPI(
     title="Semantic Search Ingestion API",
-    description="Document ingestion and crawling endpoints",
+    description=(
+        "Document ingestion, crawling and webhook endpoints. All routes "
+        "require an `Authorization: Bearer <api_key>` header. Document "
+        "ingestion is asynchronous: the API returns a job_id immediately "
+        "and the platform delivers a signed completion webhook to the "
+        "collection's callback_url when processing finishes."
+    ),
     version="1.0.0",
 )
 
@@ -57,6 +64,36 @@ app.include_router(
     prefix=f"{settings.API_V1_PREFIX}/collections/{{collection_id}}",
     tags=["Webhooks & Crawl"],
 )
+
+
+def custom_openapi():
+    """Inject a Bearer-token security scheme into the generated OpenAPI
+    document so the Swagger UI 'Authorize' button works and SDK generators
+    know every endpoint requires `Authorization: Bearer <api_key>`."""
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    schema.setdefault("components", {})["securitySchemes"] = {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "description": (
+                "Provide your API key as `Authorization: Bearer <api_key>`. "
+                "Keys are scoped to `master`, `ingest`, or `search`."
+            ),
+        }
+    }
+    schema["security"] = [{"BearerAuth": []}]
+    app.openapi_schema = schema
+    return schema
+
+
+app.openapi = custom_openapi
 
 
 @app.exception_handler(RequestValidationError)

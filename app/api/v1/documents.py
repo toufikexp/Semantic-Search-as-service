@@ -9,13 +9,58 @@ from app.schemas.document import (
     DocumentIngestRequest,
     DocumentIngestResponse,
     DocumentResponse,
+    IngestionCallbackAck,
+    IngestionCallbackPayload,
 )
+from app.schemas.error import COMMON_ERROR_RESPONSES
 from app.services import collection_service, document_service
 
 router = APIRouter()
 
+# OpenAPI 3.0 "callbacks" declaration for the ingestion.completed webhook.
+# This tells clients generating SDKs from /openapi.json the exact shape of
+# the webhook the platform will POST to their callback_url when processing
+# finishes. The {$request.body#/callback_url} placeholder references the
+# callback_url field set on the collection at creation time.
+ingestion_callback_router = APIRouter()
 
-@router.post("", response_model=DocumentIngestResponse, status_code=202)
+
+@ingestion_callback_router.post(
+    "{$request.body#/callback_url}",
+    response_model=IngestionCallbackAck,
+    summary="Ingestion completion webhook (platform → client)",
+    description=(
+        "Signed HMAC-SHA256 webhook delivered to the collection's "
+        "callback_url when an ingestion job reaches a terminal state. "
+        "The client is expected to return any 2xx to acknowledge; non-2xx "
+        "triggers up to 3 retries with a 10s timeout each."
+    ),
+)
+def ingestion_completed_callback(body: IngestionCallbackPayload) -> IngestionCallbackAck:
+    """This function exists only to generate OpenAPI documentation for the
+    outgoing webhook. It is never actually called."""
+    ...  # pragma: no cover
+
+
+@router.post(
+    "",
+    response_model=DocumentIngestResponse,
+    status_code=202,
+    responses=COMMON_ERROR_RESPONSES,
+    callbacks=ingestion_callback_router.routes,
+    summary="Ingest documents into a collection",
+    description=(
+        "Accepts a batch of documents, persists them with status='pending', "
+        "creates an ingestion job and dispatches an async Celery task. "
+        "Returns 202 immediately with the job id.\n\n"
+        "The worker then chunks each document, computes BGE-M3 embeddings "
+        "and indexes the chunks. When the job reaches a terminal state "
+        "(completed / completed_with_errors / failed) the platform POSTs "
+        "the signed webhook documented in the `callbacks` section to the "
+        "collection's `callback_url` if one is configured.\n\n"
+        "Required scope: `ingest` or `master`."
+    ),
+)
 async def ingest_documents(
     collection_id: uuid.UUID,
     body: DocumentIngestRequest,
@@ -52,7 +97,17 @@ async def ingest_documents(
     )
 
 
-@router.get("/{external_id}", response_model=DocumentResponse)
+@router.get(
+    "/{external_id}",
+    response_model=DocumentResponse,
+    responses=COMMON_ERROR_RESPONSES,
+    summary="Retrieve a document by external_id",
+    description=(
+        "Returns the document's metadata and current processing status. "
+        "Use this to check whether a specific document is ready for search "
+        "(`status=='indexed'`) or still pending."
+    ),
+)
 async def get_document(
     collection_id: uuid.UUID,
     external_id: str,
@@ -83,7 +138,17 @@ async def get_document(
     )
 
 
-@router.delete("/{external_id}", status_code=204)
+@router.delete(
+    "/{external_id}",
+    status_code=204,
+    responses=COMMON_ERROR_RESPONSES,
+    summary="Delete a document and all its chunks and embeddings",
+    description=(
+        "Removes the document row plus cascade-deletes its chunks and "
+        "embeddings. The operation is synchronous and idempotent.\n\n"
+        "Required scope: `ingest` or `master`."
+    ),
+)
 async def delete_document(
     collection_id: uuid.UUID,
     external_id: str,
