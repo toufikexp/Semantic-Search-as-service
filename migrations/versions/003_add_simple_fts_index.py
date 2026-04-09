@@ -22,12 +22,16 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("""
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_documents_fts_simple
-        ON documents
-        USING GIN (to_tsvector('simple', coalesce(title,'') || ' ' || content))
-    """)
+    # CREATE INDEX CONCURRENTLY cannot run inside a transaction block,
+    # so we break out of Alembic's implicit transaction here.
+    with op.get_context().autocommit_block():
+        op.execute("""
+            CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_documents_fts_simple
+            ON documents
+            USING GIN (to_tsvector('simple', coalesce(title,'') || ' ' || content))
+        """)
 
 
 def downgrade() -> None:
-    op.execute("DROP INDEX IF EXISTS idx_documents_fts_simple")
+    with op.get_context().autocommit_block():
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_documents_fts_simple")
