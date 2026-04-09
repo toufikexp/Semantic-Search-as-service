@@ -11,6 +11,7 @@ from app.schemas.webhook import (
     WebhookCreate,
     WebhookResponse,
 )
+from app.services import collection_service
 
 router = APIRouter()
 
@@ -33,6 +34,8 @@ async def register_webhook(
                 }
             },
         )
+
+    await collection_service.ensure_collection_exists(db, collection_id)
 
     webhook_id = uuid.uuid4()
     endpoint_url = f"/api/v1/collections/{collection_id}/webhooks/{webhook_id}/receive"
@@ -65,6 +68,8 @@ async def trigger_crawl(
                 }
             },
         )
+
+    await collection_service.ensure_collection_exists(db, collection_id)
 
     from app.models.ingestion_job import IngestionJob
     from app.workers.tasks import run_crawl

@@ -38,6 +38,8 @@ async def search_collection(
             },
         )
 
+    collection = await collection_service.ensure_collection_exists(db, collection_id)
+
     # Generate query embedding for semantic/hybrid search
     query_vector = None
     if body.mode in ("semantic", "hybrid"):
@@ -63,9 +65,8 @@ async def search_collection(
                 "Falling back to keyword-only search for hybrid query"
             )
 
-    # Fetch collection language for keyword/hybrid text search config
-    collection = await collection_service.get_collection(db, collection_id)
-    language = collection.language if collection else "auto"
+    # Collection language for keyword/hybrid text search config
+    language = collection.language
 
     return await search_service.execute_search(
         db, collection_id, body, query_vector, language=language
@@ -90,5 +91,7 @@ async def suggest(
                 }
             },
         )
+
+    await collection_service.ensure_collection_exists(db, collection_id)
 
     return await search_service.get_suggestions(db, collection_id, body)

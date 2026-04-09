@@ -1,5 +1,6 @@
 import uuid
 
+from fastapi import HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -7,6 +8,31 @@ from app.core.security import generate_api_key
 from app.models.api_key import ApiKey
 from app.models.collection import Collection
 from app.schemas.collection import CollectionCreate, CollectionUpdate
+
+
+async def ensure_collection_exists(
+    db: AsyncSession, collection_id: uuid.UUID
+) -> Collection:
+    """Load a collection or raise a 404 HTTPException with the standard
+    JSON error envelope if it does not exist.
+
+    Use this in route handlers that take ``collection_id`` in the path to
+    return a clean 404 instead of letting a downstream FK violation surface
+    as a 500 or nginx 502.
+    """
+    result = await db.execute(select(Collection).where(Collection.id == collection_id))
+    collection = result.scalar_one_or_none()
+    if collection is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": {
+                    "code": "COLLECTION_NOT_FOUND",
+                    "message": f"Collection {collection_id} does not exist",
+                }
+            },
+        )
+    return collection
 
 
 async def create_collection(

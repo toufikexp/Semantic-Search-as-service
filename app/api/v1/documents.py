@@ -10,7 +10,7 @@ from app.schemas.document import (
     DocumentIngestResponse,
     DocumentResponse,
 )
-from app.services import document_service
+from app.services import collection_service, document_service
 
 router = APIRouter()
 
@@ -33,6 +33,8 @@ async def ingest_documents(
                 }
             },
         )
+
+    await collection_service.ensure_collection_exists(db, collection_id)
 
     job = await document_service.ingest_documents(
         db, collection_id, body.documents, body.upsert
@@ -99,6 +101,8 @@ async def delete_document(
                 }
             },
         )
+
+    await collection_service.ensure_collection_exists(db, collection_id)
 
     deleted = await document_service.delete_document(db, collection_id, external_id)
     if not deleted:
