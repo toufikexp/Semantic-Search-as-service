@@ -92,6 +92,8 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.gpu
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       TZ: Africa/Algiers
       DATABASE_URL_SYNC: postgresql://postgres:${DB_PASSWORD:-changeme}@postgres:5432/semantic_search
@@ -130,6 +132,8 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.crawler
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       TZ: Africa/Algiers
       DATABASE_URL_SYNC: postgresql://postgres:${DB_PASSWORD:-changeme}@postgres:5432/semantic_search
