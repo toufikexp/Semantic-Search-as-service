@@ -125,6 +125,7 @@ async def get_document(
         id=doc.id,
         external_id=doc.external_id,
         collection_id=doc.collection_id,
+        job_id=doc.job_id,
         title=doc.title,
         content_type=doc.content_type,
         url=doc.url,

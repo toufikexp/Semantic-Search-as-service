@@ -55,11 +55,11 @@ def _send_callback(collection_id: str, job_id: str) -> None:
         if not job:
             return
 
-        # Build per-document status list
+        # Build per-document status list for this specific job
         docs = (
             db.execute(
                 select(Document.external_id, Document.status).where(
-                    Document.collection_id == collection_id,
+                    Document.job_id == job_id,
                     Document.status.in_(["indexed", "failed"]),
                 )
             )
@@ -150,11 +150,11 @@ def process_ingestion_job(self, job_id: str):
         # on exit and expired attribute access would raise).
         collection_id_str = str(collection.id)
 
-        # Get all pending documents for this collection
+        # Get only the documents belonging to this job
         documents = (
             db.execute(
                 select(Document).where(
-                    Document.collection_id == job.collection_id,
+                    Document.job_id == job.id,
                     Document.status == "pending",
                 )
             )
@@ -401,6 +401,7 @@ def run_crawl(self, job_id: str, collection_id: str, crawl_config: dict):
                     url=url,
                     content_hash=content_hash,
                     status="pending",
+                    job_id=job_id,
                 )
                 db.merge(doc)
                 crawled += 1
@@ -450,7 +451,7 @@ def process_crawled_documents(job_id: str, collection_id: str):
         documents = (
             db.execute(
                 select(Document).where(
-                    Document.collection_id == collection_id,
+                    Document.job_id == job_id,
                     Document.status == "pending",
                 )
             )

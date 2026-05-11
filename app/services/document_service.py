@@ -47,6 +47,7 @@ async def ingest_documents(
                 existing.content_hash = content_hash
                 existing.content_type = doc_input.content_type
                 existing.status = "pending"
+                existing.job_id = job.id
                 continue
 
         doc = Document(
@@ -59,6 +60,7 @@ async def ingest_documents(
             metadata_=doc_input.metadata,
             content_hash=content_hash,
             status="pending",
+            job_id=job.id,
         )
         db.add(doc)
 

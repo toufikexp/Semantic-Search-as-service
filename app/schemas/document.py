@@ -198,6 +198,7 @@ class DocumentResponse(BaseModel):
     id: uuid.UUID
     external_id: str
     collection_id: uuid.UUID
+    job_id: uuid.UUID | None = None
     title: str | None
     content_type: str
     url: str | None

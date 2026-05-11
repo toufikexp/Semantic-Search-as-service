@@ -31,3 +31,4 @@ class IngestionJob(Base):
 
     # Relationships
     collection = relationship("Collection", back_populates="ingestion_jobs")
+    documents = relationship("Document", back_populates="ingestion_job")
