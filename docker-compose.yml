@@ -181,6 +181,9 @@ services:
     depends_on:
       - search-api
       - ingestion-api
+    networks:
+      - default
+      - shared-ingress
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost/nginx-health"]
       interval: 30s
@@ -190,3 +193,8 @@ services:
 volumes:
   pgdata:
   redisdata:
+
+networks:
+  default:
+  shared-ingress:
+    external: true
